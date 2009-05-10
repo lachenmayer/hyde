@@ -21,7 +21,7 @@ from hydeengine import url, Initializer, Generator, setup_env
 from hydeengine.siteinfo import SiteNode, SiteInfo, Page
 
 TEST_SITE = Folder(TEST_ROOT).child_folder("test_site")
-
+        
 def setup_module(module):
     Initializer(TEST_SITE.path).initialize(ROOT, template="default", force=True)
     setup_env(TEST_SITE.path)

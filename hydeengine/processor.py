@@ -64,7 +64,17 @@ class Processor(object):
         cache[node.fragment] = current_processors
         current_processors.reverse()
         return current_processors
-                
+
+    def remove(self, item):
+        if hasattr(item, "resources"):
+            self.logger.info("Removing Node %s" % item.url)
+            item.target_folder.delete()
+            item.temp_folder.delete()
+        else:
+            self.logger.info("Removing Resource %s" % item.url)
+            item.target_file.delete()
+            item.temp_file.delete()
+        
     def process(self, resource):
         if (resource.node.type not in ("content", "media") or
             resource.is_layout):
@@ -103,9 +113,11 @@ class Processor(object):
             self.logger.debug("       Finalizing %s" % str(child.folder))    
             fragment = child.temp_folder.get_fragment(node.site.temp_folder)
             fragment = fragment.rstrip("/")
+            if not fragment:
+                fragment = "/"
             if fragment in self.settings.SITE_POST_PROCESSORS:
                 processor_config = self.settings.SITE_POST_PROCESSORS[fragment]
                 for processor_name, params in processor_config.iteritems():
-                    self.logger.debug("           Executing %s" % processor_name)
+                    self.logger.debug("           Executing %s" % processor_name) 
                     processor = load_processor(processor_name)
                     processor.process(child.temp_folder, params)

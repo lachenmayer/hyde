@@ -9,6 +9,7 @@ http://codespeak.net/py/dist/test.html
 """
 import os
 import sys
+import time as sleeper
 from datetime import time, datetime, timedelta
 import unittest
 from threading import Thread
@@ -37,7 +38,7 @@ def setup_module(module):
     
 def teardown_module(module):
     TEST_SITE.delete()
-    
+
 class TestFilters:
     
     def setup_method(self, method):
@@ -136,7 +137,7 @@ class TestSiteInfo:
         folder.list(Visitor())
 
     def test_population(self):
-        assert self.site.name == "Hyde"
+        assert self.site.name == "Your Site"
         self.assert_node_complete(self.site.content_node,
                                     TEST_SITE.child_folder("content"))
         self.assert_node_complete(self.site.media_node,
@@ -262,12 +263,13 @@ class MonitorTests(object):
         self.site.refresh()
         self.exception_queue = Queue()
         self.clean_queue()
+        assert self.queue.empty()
         
 class TestSiteInfoMonitoring(MonitorTests):
     
     def change_checker(self, change, path):
         try:
-            changes = self.queue.get(block=True, timeout=20)
+            changes = self.queue.get(block=True, timeout=30)
             self.queue.task_done()
             assert changes
             assert not changes['exception']
@@ -277,7 +279,7 @@ class TestSiteInfoMonitoring(MonitorTests):
         except:
             self.exception_queue.put(sys.exc_info())
             raise
-            
+
     def test_monitor_stop(self):
         m = self.site.monitor()
         self.site.dont_monitor()
@@ -304,23 +306,55 @@ class TestSiteInfoMonitoring(MonitorTests):
         t.join()
         if not direct:
             f.delete()
-        assert self.exception_queue.empty()
+        assert self.exception_queue.empty() 
         
     def test_delete(self):
-        path = self.site.layout_folder.child("test.ggg")
-        self.test_add(direct=True)
+        f = File(self.site.content_folder.child("test.ddd"))
+        f.write("test")        
+        self.site.refresh() 
+        self.clean_queue() 
+        self.site.monitor(self.queue)
         t = Thread(target=self.change_checker, 
-                    kwargs={"change":"Deleted", "path":path})
+                    kwargs={"change":"Deleted", "path":f.path})
         t.start()      
-        File(path).delete()
+        f.delete()
         t.join()
+        assert self.exception_queue.empty()
+
+    def node_remove_checker(self, path):
+        try:
+            changes = self.queue.get(block=True, timeout=30)
+            self.queue.task_done()
+            assert changes
+            assert not changes['exception']
+            assert changes['change'] == change
+            assert changes['node']
+            assert changes['node'].folder.path == path            
+        except:
+            self.exception_queue.put(sys.exc_info())
+            raise
+
+    def test_delete_dir(self):
+        d = self.site.content_folder.child_folder("test_test")
+        f = File(d.child("test.nnn"))
+        d.make()
+        f.write("test")
+        self.site.refresh() 
+        self.clean_queue()
+        self.site.monitor(self.queue)
+        t = Thread(target=self.node_remove_checker, 
+                    kwargs={"change":"NodeRemoved", "path":d.path})
+        t.start()      
+        d.delete()
+        t.join()
+        d.delete()
         assert self.exception_queue.empty()
         
 class TestYAMLProcessor(MonitorTests):
    
     def yaml_checker(self, path, vars):
            try:
-               changes = self.queue.get(block=True, timeout=10)
+               changes = self.queue.get(block=True, timeout=30)
                self.queue.task_done()
                assert changes
                assert not changes['exception']
@@ -399,7 +433,7 @@ class TestSorting(MonitorTests):
 class TestProcessing(MonitorTests):
     def checker(self, asserter):
            try:
-               changes = self.queue.get(block=True, timeout=15)
+               changes = self.queue.get(block=True, timeout=30)
                self.queue.task_done()
                assert changes
                assert not changes['exception']
@@ -469,7 +503,6 @@ class TestProcessing(MonitorTests):
         expected_text = File(
                 TEST_ROOT.child("dst_test_markdown.html")).read_all()
         self.generator.process(actual_html_resource)
-
         # Ensure source file is not changed
         # The source should be copied to tmp and then
         # the processor should do its thing.
@@ -516,40 +549,58 @@ class TestProcessing(MonitorTests):
         self.generator = Generator(TEST_SITE.path)
         self.generator.build_siteinfo()
         source = File(TEST_ROOT.child("test_src.html"))
+        target = File(self.site.content_folder.child("_test.html"))
         self.site.refresh()
         self.site.monitor(self.queue)
         t = Thread(target=self.checker, 
                         kwargs={"asserter":self.assert_layout_not_rendered})
         t.start()
-        source.copy_to(self.site.content_folder.child("_test.html"))
+        source.copy_to(target)
         t.join()
-        assert self.exception_queue.empty()
-    
-    def test_markdown(self):
-        self.generator = Generator(TEST_SITE.path)
-        self.generator.build_siteinfo()
-        source = File(TEST_ROOT.child("src_test_markdown.html"))
-        self.site.refresh()
-        self.site.monitor(self.queue)
-        t = Thread(target=self.checker, 
-                        kwargs={"asserter":self.assert_valid_markdown})
-        t.start()
-        source.copy_to(self.site.content_folder.child("test.html"))
-        t.join()
+        target.delete()
         assert self.exception_queue.empty()
         
+    
+    def test_markdown(self):
+        try:
+            import markdown
+        except ImportError:
+            markdown = False
+            print "Markdown not found, skipping unit tests"
+        
+        if markdown:            
+            self.generator = Generator(TEST_SITE.path)
+            self.generator.build_siteinfo()
+            source = File(TEST_ROOT.child("src_test_markdown.html"))
+            self.site.refresh()
+            assert self.queue.empty()
+            self.site.monitor(self.queue)
+            t = Thread(target=self.checker, 
+                            kwargs={"asserter":self.assert_valid_markdown})
+            t.start()
+            source.copy_to(self.site.content_folder.child("test.html"))
+            t.join()
+            assert self.exception_queue.empty()            
+        
     def test_textile(self):
-        self.generator = Generator(TEST_SITE.path)
-        self.generator.build_siteinfo()
-        source = File(TEST_ROOT.child("src_test_textile.html"))
-        self.site.refresh()
-        self.site.monitor(self.queue)
-        t = Thread(target=self.checker, 
-                        kwargs={"asserter":self.assert_valid_textile})
-        t.start()
-        source.copy_to(self.site.content_folder.child("test.html"))
-        t.join()
-        assert self.exception_queue.empty()
+        try:
+            import textile 
+        except ImportError: 
+            textile = False
+            print "Textile not found, skipping unit tests"
+
+        if textile:            
+            self.generator = Generator(TEST_SITE.path)
+            self.generator.build_siteinfo()
+            source = File(TEST_ROOT.child("src_test_textile.html"))
+            self.site.refresh()
+            self.site.monitor(self.queue)
+            t = Thread(target=self.checker, 
+                            kwargs={"asserter":self.assert_valid_textile})
+            t.start()
+            source.copy_to(self.site.content_folder.child("test.html"))
+            t.join()
+            assert self.exception_queue.empty()
 
 class TestPostProcessors:
             
